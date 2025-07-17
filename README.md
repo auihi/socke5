@@ -1,6 +1,5 @@
-# 部署socke5
-socke5 默认账号：123123 密码：123123
-# 下载脚本
+
+# 部署socke5 端口1080 账号：123123 密码：123123
 sudo -i
 
 wget https://raw.githubusercontent.com/auihi/socke5/main/install_socks5.sh
