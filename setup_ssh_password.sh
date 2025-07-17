@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# --- Google Cloud VM SSH 密码认证及 Root 密码一键设置脚本 ---
+# --- Google Cloud VM SSH 密码认证及 Root 密码一键设置脚本 (优化版) ---
 #
 # 该脚本将修改SSH配置文件，确保PasswordAuthentication和PermitRootLogin设置为yes，
-# 并为root用户设置指定的密码。
+# 并使用更可靠的chpasswd命令为root用户设置指定的密码。
 #
 # !! 警告 !!：允许root用户通过密码登录具有高安全风险。
 #            通过命令行参数传递密码也存在安全风险（如被记录在shell历史）。
 #            请在了解风险后谨慎使用。
 #
-# 用法：./setup_root_password_ssh.sh [你的Root密码]
-# 示例：./setup_root_password_ssh.sh MySuperStrongPa$$w0rd123
+# 用法：./setup_root_ssh.sh [你的Root密码]
+# 示例：./setup_root_ssh.sh MyVerySecureRootPa$$word123
 # -----------------------------------------------------------------
 
 echo "--- 正在开始 SSH 密码认证及 Root 密码一键设置 ---"
@@ -18,13 +18,13 @@ echo "--- 正在开始 SSH 密码认证及 Root 密码一键设置 ---"
 # 检查是否传入了密码参数
 if [ -z "$1" ]; then
     echo "错误：请提供一个密码作为命令行参数。"
-    echo "用法：./setup_root_password_ssh.sh [你的Root密码]"
+    echo "用法：./setup_root_ssh.sh [你的Root密码]"
     exit 1
 fi
 
 NEW_ROOT_PASSWORD="$1"
 
-# 检查当前用户是否具有sudo权限 (在root用户下运行此脚本通常不需要，但为了兼容性保留)
+# 检查当前用户是否具有sudo权限 (以防非root用户运行)
 if ! sudo -v &>/dev/null; then
     echo "错误：当前用户没有sudo权限。请确保使用具有sudo权限的用户运行此脚本，或直接以root身份运行。"
     exit 1
@@ -43,19 +43,21 @@ fi
 echo "修改 /etc/ssh/sshd_config 文件..."
 
 # 确保 PermitRootLogin 为 yes
-sudo sed -i '/^PermitRootLogin/d' /etc/ssh/sshd_config # 删除所有现有的PermitRootLogin行
-echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config > /dev/null # 在文件末尾添加 PermitRootLogin yes
+# 先删除所有现有的 PermitRootLogin 行，再在文件末尾添加 PermitRootLogin yes
+sudo sed -i '/^PermitRootLogin/d' /etc/ssh/sshd_config
+echo "PermitRootLogin yes" | sudo tee -a /etc/ssh/sshd_config > /dev/null
 
 # 确保 PasswordAuthentication 为 yes
+# 先替换可能存在的 "no" 为 "yes"
 sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
-sudo sed -i '/^#PasswordAuthentication yes/s/^#//' /etc/ssh/sshd_config # 取消注释已注释的PasswordAuthentication yes行
+# 再取消注释可能存在的 "#PasswordAuthentication yes"
+sudo sed -i '/^#PasswordAuthentication yes/s/^#//' /etc/ssh/sshd_config
 
 # 如果文件中根本没有 PasswordAuthentication 行，就添加一个
 if ! grep -q "PasswordAuthentication" /etc/ssh/sshd_config; then
     echo "在 /etc/ssh/sshd_config 文件末尾添加 PasswordAuthentication yes..."
     echo "PasswordAuthentication yes" | sudo tee -a /etc/ssh/sshd_config > /dev/null
 fi
-
 
 # 检查修改是否成功
 if grep -q "PasswordAuthentication yes" /etc/ssh/sshd_config && \
@@ -67,9 +69,11 @@ else
     exit 1
 fi
 
-# 3. 设置 Root 用户的密码 (使用echo管道)
+# 3. 设置 Root 用户的密码 (使用 chpasswd)
 echo "正在为 'root' 用户设置密码..."
-echo -e "$NEW_ROOT_PASSWORD\n$NEW_ROOT_PASSWORD" | sudo passwd root
+# 使用 printf -v 来确保密码字符串的准确性，防止shell展开问题
+printf -v password_str "%s" "$NEW_ROOT_PASSWORD"
+echo "root:$password_str" | sudo chpasswd
 
 if [ $? -eq 0 ]; then
     echo "用户 'root' 的密码设置成功。"
